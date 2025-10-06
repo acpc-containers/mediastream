@@ -1,0 +1,226 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Host Broadcaster</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 0; }
+    header { padding: 8px 12px; background: #0d47a1; color: #fff; }
+    main { display: grid; grid-template-columns: 300px 1fr; gap: 12px; padding: 12px; }
+    .panel { border: 1px solid #ddd; border-radius: 6px; padding: 10px; }
+    .row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+    .pill { padding: 2px 6px; border-radius: 999px; background: #eee; font-size: 12px; }
+    video { max-width: 100%; background: #000; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { padding: 4px 0; border-bottom: 1px dashed #eee; }
+    textarea { width: 100%; height: 60px; }
+    input, button, select { padding: 6px 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>LAN WebRTC Host</strong>
+    <span class="pill" id="status-pill">disconnected</span>
+  </header>
+  <main>
+    <section class="panel">
+      <h3>Presence</h3>
+      <div class="row">Hostname: <span id="hostname">loading...</span></div>
+      <div class="row">Room: <input id="roomId" value="default" /></div>
+      <div class="row">Signal URL: <input id="signalUrl" /></div>
+      <div class="row">
+        <button id="connectBtn">Connect</button>
+        <button id="disconnectBtn">Disconnect</button>
+      </div>
+      <h4>Clients</h4>
+      <ul id="clients"></ul>
+    </section>
+    <section class="panel">
+      <h3>Broadcast</h3>
+      <div class="row">
+        <button id="shareBtn">Share Screen</button>
+        <button id="stopBtn">Stop</button>
+      </div>
+      <div class="row">Bitrate (kbps): <span id="bitrate">-</span> | Resolution: <span id="resolution">-</span></div>
+      <video id="preview" autoplay playsinline muted></video>
+      <h4>Private Chat</h4>
+      <div class="row">
+        <select id="chatTarget"></select>
+      </div>
+      <textarea id="chatInput" placeholder="Message..."></textarea>
+      <div class="row">
+        <button id="sendChat">Send</button>
+      </div>
+      <ul id="chatLog"></ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-I5ABq9wScUkhqYpKEm4s0g+QaTnUvtTuj6pC4JxQb7qXrziD3OeVn8m7IxZyH5hF" crossorigin="anonymous"></script>
+  <script>
+    const SIGNALING_DEFAULT = (location.protocol === 'https:' ? 'wss://' : 'ws://') + (location.hostname || 'localhost') + ':3000';
+    const signalUrlInput = document.getElementById('signalUrl');
+    signalUrlInput.value = SIGNALING_DEFAULT;
+    const roomIdInput = document.getElementById('roomId');
+    const clientsEl = document.getElementById('clients');
+    const statusPill = document.getElementById('status-pill');
+    const hostnameEl = document.getElementById('hostname');
+    const previewVideo = document.getElementById('preview');
+    const bitrateEl = document.getElementById('bitrate');
+    const resolutionEl = document.getElementById('resolution');
+    const chatTarget = document.getElementById('chatTarget');
+    const chatInput = document.getElementById('chatInput');
+    const chatLog = document.getElementById('chatLog');
+
+    let socket = null;
+    let localStream = null;
+    const peers = new Map(); // clientSocketId -> RTCPeerConnection
+
+    const iceConfig = { iceServers: [], iceTransportPolicy: 'all' };
+
+    async function fetchHostname() {
+      try {
+        const res = await fetch('/hostname');
+        const j = await res.json();
+        hostnameEl.textContent = j.hostname || (await (await fetch(signalUrlInput.value.replace('ws', 'http') + '/hostname')).json()).hostname || 'host';
+      } catch (e) {
+        hostnameEl.textContent = 'host';
+      }
+    }
+    fetchHostname();
+
+    function setStatus(text, ok) {
+      statusPill.textContent = text;
+      statusPill.style.background = ok ? '#c8e6c9' : '#ffcdd2';
+    }
+
+    function updatePresenceList(list, roomId) {
+      clientsEl.innerHTML = '';
+      chatTarget.innerHTML = '';
+      const clients = list.filter(c => c.roomId === roomId && c.role === 'client');
+      for (const c of clients) {
+        const li = document.createElement('li');
+        li.textContent = `${c.hostname || c.socketId} - ${c.latencyMs ?? '-'} ms`;
+        clientsEl.appendChild(li);
+        const opt = document.createElement('option');
+        opt.value = c.socketId; opt.textContent = c.hostname || c.socketId;
+        chatTarget.appendChild(opt);
+      }
+    }
+
+    function createPeer(clientSocketId) {
+      const pc = new RTCPeerConnection(iceConfig);
+      if (localStream) {
+        for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
+      }
+      pc.onicecandidate = ev => {
+        if (ev.candidate) socket.emit('webrtc:ice-candidate', { toSocketId: clientSocketId, candidate: ev.candidate, roomId: roomIdInput.value });
+      };
+      pc.onconnectionstatechange = () => {
+        // no-op UI
+      };
+      return pc;
+    }
+
+    async function callClient(clientSocketId) {
+      const pc = createPeer(clientSocketId);
+      peers.set(clientSocketId, pc);
+      const offer = await pc.createOffer({ offerToReceiveVideo: false, offerToReceiveAudio: false });
+      await pc.setLocalDescription(offer);
+      socket.emit('webrtc:offer', { toSocketId: clientSocketId, sdp: offer, roomId: roomIdInput.value });
+    }
+
+    async function startShare() {
+      localStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+      previewVideo.srcObject = localStream;
+      // Update resolution
+      const [track] = localStream.getVideoTracks();
+      const settings = track.getSettings();
+      resolutionEl.textContent = `${settings.width}x${settings.height}`;
+      // Re-add tracks to all peers if any existed
+      for (const [id, pc] of peers) {
+        for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
+      }
+    }
+
+    function stopShare() {
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+        previewVideo.srcObject = null;
+        resolutionEl.textContent = '-';
+      }
+      for (const [id, pc] of peers) pc.close();
+      peers.clear();
+    }
+
+    function attachSocketHandlers() {
+      socket.on('connect', () => setStatus('connected', true));
+      socket.on('disconnect', () => setStatus('disconnected', false));
+
+      socket.on('presence:update', (list) => updatePresenceList(list, roomIdInput.value));
+
+      // Answers and ICE from clients
+      socket.on('webrtc:answer', async ({ fromSocketId, sdp }) => {
+        const pc = peers.get(fromSocketId) || createPeer(fromSocketId);
+        peers.set(fromSocketId, pc);
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      });
+      socket.on('webrtc:ice-candidate', ({ fromSocketId, candidate }) => {
+        const pc = peers.get(fromSocketId);
+        if (pc && candidate) pc.addIceCandidate(new RTCIceCandidate(candidate));
+      });
+
+      // Private chat inbound
+      socket.on('chat:private', ({ fromSocketId, message, ts }) => {
+        const li = document.createElement('li');
+        const at = new Date(ts).toLocaleTimeString();
+        li.textContent = `[${at}] ${fromSocketId}: ${message}`;
+        chatLog.appendChild(li);
+      });
+
+      // Heartbeat
+      setInterval(() => {
+        const t0 = performance.now();
+        socket.emit('heartbeat:ping', t0);
+      }, 5000);
+      socket.on('heartbeat:pong', (t0) => {
+        const rtt = performance.now() - t0;
+        socket.emit('heartbeat:latency', Math.round(rtt));
+      });
+    }
+
+    document.getElementById('connectBtn').onclick = () => {
+      if (socket) socket.disconnect();
+      socket = io(signalUrlInput.value, { transports: ['websocket'] });
+      attachSocketHandlers();
+      socket.emit('identify', { role: 'host', hostname: hostnameEl.textContent, roomId: roomIdInput.value });
+    };
+    document.getElementById('disconnectBtn').onclick = () => { if (socket) socket.disconnect(); };
+    document.getElementById('shareBtn').onclick = startShare;
+    document.getElementById('stopBtn').onclick = stopShare;
+    document.getElementById('sendChat').onclick = () => {
+      const toSocketId = chatTarget.value;
+      const message = chatInput.value.trim();
+      if (!toSocketId || !message) return;
+      socket.emit('chat:private', { toSocketId, message });
+      const li = document.createElement('li');
+      li.textContent = `[me] -> ${toSocketId}: ${message}`;
+      chatLog.appendChild(li);
+      chatInput.value = '';
+    };
+
+    // Initiate calls when presence list changes
+    const observer = new MutationObserver(() => {
+      // naive: call all listed clients
+      const opts = Array.from(chatTarget.options).map(o => o.value);
+      for (const id of opts) {
+        if (!peers.has(id) && localStream) callClient(id);
+      }
+    });
+    observer.observe(clientsEl, { childList: true });
+  </script>
+</body>
+</html>
+
+

@@ -1,0 +1,43 @@
+version: "3.9"
+services:
+  signaling-server:
+    build: ./signaling-server
+    container_name: signaling
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    networks:
+      - webrtc_lan_net
+
+  host-app:
+    build: ./host-app
+    container_name: host-app
+    environment:
+      - NODE_ENV=production
+      - SIGNALING_URL=ws://signaling:3000
+    ports:
+      - "4000:4000"
+    depends_on:
+      - signaling-server
+    networks:
+      - webrtc_lan_net
+
+  client-app:
+    build: ./client-app
+    container_name: client-app
+    environment:
+      - NODE_ENV=production
+      - SIGNALING_URL=ws://signaling:3000
+    ports:
+      - "5000:5000"
+    depends_on:
+      - signaling-server
+    networks:
+      - webrtc_lan_net
+
+networks:
+  webrtc_lan_net:
+    driver: bridge
+
+

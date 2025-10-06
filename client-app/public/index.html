@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Client Viewer</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #000; color: #fff; font-family: sans-serif; }
+    #overlay { position: fixed; top: 8px; left: 8px; background: rgba(0,0,0,0.5); padding: 6px 8px; border-radius: 6px; font-size: 12px; }
+    #controls { position: fixed; bottom: 8px; left: 8px; background: rgba(0,0,0,0.5); padding: 6px 8px; border-radius: 6px; font-size: 12px; }
+    canvas { width: 100vw; height: 100vh; display: block; background: #000; }
+    textarea { width: 240px; height: 60px; }
+    button, input { padding: 6px 8px; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="overlay">
+    <div>Hostname: <span id="hostname">-</span></div>
+    <div>Room: <input id="roomId" value="default" size="10"></div>
+    <div>Signal URL: <input id="signalUrl" size="28"></div>
+    <div>Status: <span id="status">disconnected</span></div>
+    <div>Timer: <span id="timer">00:00:00</span></div>
+  </div>
+  <div id="controls">
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn">Disconnect</button>
+    <div>
+      <input id="chatTo" placeholder="Host socketId" size="24" />
+    </div>
+    <textarea id="chatInput" placeholder="Private message..."></textarea>
+    <div>
+      <button id="sendChat">Send</button>
+    </div>
+    <ul id="chatLog"></ul>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-I5ABq9wScUkhqYpKEm4s0g+QaTnUvtTuj6pC4JxQb7qXrziD3OeVn8m7IxZyH5hF" crossorigin="anonymous"></script>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+    window.addEventListener('resize', resize); resize();
+
+    const statusEl = document.getElementById('status');
+    const timerEl = document.getElementById('timer');
+    const hostnameEl = document.getElementById('hostname');
+    const chatInput = document.getElementById('chatInput');
+    const chatLog = document.getElementById('chatLog');
+    const chatTo = document.getElementById('chatTo');
+    const signalUrlInput = document.getElementById('signalUrl');
+    const roomIdInput = document.getElementById('roomId');
+
+    const SIGNALING_DEFAULT = (location.protocol === 'https:' ? 'wss://' : 'ws://') + (location.hostname || 'localhost') + ':3000';
+    signalUrlInput.value = SIGNALING_DEFAULT;
+
+    let socket = null;
+    let pc = null;
+    let remoteStream = null;
+    let videoEl = document.createElement('video');
+    videoEl.autoplay = true; videoEl.playsInline = true; videoEl.muted = true;
+
+    const iceConfig = { iceServers: [], iceTransportPolicy: 'all' };
+
+    async function fetchHostname() {
+      try {
+        const res = await fetch('/hostname');
+        const j = await res.json();
+        hostnameEl.textContent = j.hostname || 'client';
+      } catch (e) {
+        hostnameEl.textContent = 'client';
+      }
+    }
+    fetchHostname();
+
+    function setStatus(s, ok) { statusEl.textContent = s; statusEl.style.color = ok ? '#c8e6c9' : '#ffcdd2'; }
+
+    function startTimer() {
+      const start = Date.now();
+      setInterval(() => {
+        const t = Math.floor((Date.now() - start) / 1000);
+        const h = String(Math.floor(t/3600)).padStart(2,'0');
+        const m = String(Math.floor((t%3600)/60)).padStart(2,'0');
+        const s = String(t%60).padStart(2,'0');
+        timerEl.textContent = `${h}:${m}:${s}`;
+      }, 1000);
+    }
+    startTimer();
+
+    function drawLoop() {
+      if (remoteStream) {
+        if (videoEl.videoWidth && videoEl.videoHeight) {
+          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+        }
+      } else {
+        ctx.fillStyle = '#111'; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle = '#888'; ctx.fillText('Waiting for stream...', 20, 30);
+      }
+      requestAnimationFrame(drawLoop);
+    }
+    drawLoop();
+
+    function attachSocketHandlers() {
+      socket.on('connect', () => setStatus('connected', true));
+      socket.on('disconnect', () => setStatus('disconnected', false));
+
+      socket.on('webrtc:offer', async ({ fromSocketId, sdp }) => {
+        pc = new RTCPeerConnection(iceConfig);
+        pc.ontrack = (ev) => {
+          remoteStream = ev.streams[0];
+          videoEl.srcObject = remoteStream;
+        };
+        pc.onicecandidate = (ev) => {
+          if (ev.candidate) socket.emit('webrtc:ice-candidate', { toSocketId: fromSocketId, candidate: ev.candidate, roomId: roomIdInput.value });
+        };
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('webrtc:answer', { toSocketId: fromSocketId, sdp: answer, roomId: roomIdInput.value });
+      });
+      socket.on('webrtc:ice-candidate', ({ fromSocketId, candidate }) => {
+        if (pc && candidate) pc.addIceCandidate(new RTCIceCandidate(candidate));
+      });
+
+      // Private chat inbound
+      socket.on('chat:private', ({ fromSocketId, message, ts }) => {
+        const li = document.createElement('li');
+        const at = new Date(ts).toLocaleTimeString();
+        li.textContent = `[${at}] ${fromSocketId}: ${message}`;
+        chatLog.appendChild(li);
+      });
+
+      // Heartbeat
+      setInterval(() => { socket.emit('heartbeat:ping', performance.now()); }, 5000);
+      socket.on('heartbeat:pong', (t0) => {
+        const rtt = performance.now() - t0; socket.emit('heartbeat:latency', Math.round(rtt));
+      });
+    }
+
+    document.getElementById('connectBtn').onclick = () => {
+      if (socket) socket.disconnect();
+      socket = io(signalUrlInput.value, { transports: ['websocket'] });
+      attachSocketHandlers();
+      socket.emit('identify', { role: 'client', hostname: hostnameEl.textContent, roomId: roomIdInput.value });
+    };
+    document.getElementById('disconnectBtn').onclick = () => { if (socket) socket.disconnect(); };
+    document.getElementById('sendChat').onclick = () => {
+      const toSocketId = chatTo.value.trim();
+      const message = chatInput.value.trim();
+      if (!toSocketId || !message) return;
+      socket.emit('chat:private', { toSocketId, message });
+      const li = document.createElement('li');
+      li.textContent = `[me] -> ${toSocketId}: ${message}`;
+      chatLog.appendChild(li);
+      chatInput.value = '';
+    };
+  </script>
+</body>
+</html>
+
+
