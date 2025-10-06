@@ -38,6 +38,7 @@
     </section>
     <section class="panel">
       <h3>Broadcast</h3>
+      <div id="error" style="color:#b00020; font-size:12px; margin-bottom:8px;"></div>
       <div class="row">
         <button id="shareBtn">Share Screen</button>
         <button id="stopBtn">Stop</button>
@@ -131,15 +132,27 @@
     }
 
     async function startShare() {
-      localStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
-      previewVideo.srcObject = localStream;
-      // Update resolution
-      const [track] = localStream.getVideoTracks();
-      const settings = track.getSettings();
-      resolutionEl.textContent = `${settings.width}x${settings.height}`;
-      // Re-add tracks to all peers if any existed
-      for (const [id, pc] of peers) {
-        for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
+      const errEl = document.getElementById('error');
+      errEl.textContent = '';
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+          throw new Error('Screen capture not supported in this browser.');
+        }
+        localStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+        previewVideo.srcObject = localStream;
+        const [track] = localStream.getVideoTracks();
+        const settings = track.getSettings();
+        resolutionEl.textContent = `${settings.width}x${settings.height}`;
+        track.onended = () => { stopShare(); };
+        for (const [id, pc] of peers) {
+          for (const t of localStream.getTracks()) pc.addTrack(t, localStream);
+        }
+      } catch (e) {
+        console.error('startShare failed', e);
+        errEl.textContent = (e && e.message) ? e.message : 'Failed to start screen sharing.';
+        if (location.hostname !== 'localhost' && location.protocol !== 'https:') {
+          errEl.textContent += ' Tip: Screen capture may require HTTPS. Try Chrome on LAN with a self-signed cert or open DevTools -> Site settings to allow screen capture.';
+        }
       }
     }
 
