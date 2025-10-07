@@ -124,10 +124,12 @@
     }
 
     async function callClient(clientSocketId) {
+      console.log('Calling client:', clientSocketId);
       const pc = createPeer(clientSocketId);
       peers.set(clientSocketId, pc);
-      const offer = await pc.createOffer({ offerToReceiveVideo: false, offerToReceiveAudio: false });
+      const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      console.log('Sending offer to client:', clientSocketId);
       socket.emit('webrtc:offer', { toSocketId: clientSocketId, sdp: offer, roomId: roomIdInput.value });
     }
 
@@ -173,11 +175,13 @@
 
       // Answers and ICE from clients
       socket.on('webrtc:answer', async ({ fromSocketId, sdp }) => {
+        console.log('Received answer from client:', fromSocketId);
         const pc = peers.get(fromSocketId) || createPeer(fromSocketId);
         peers.set(fromSocketId, pc);
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
       });
       socket.on('webrtc:ice-candidate', ({ fromSocketId, candidate }) => {
+        console.log('Received ICE candidate from client:', fromSocketId);
         const pc = peers.get(fromSocketId);
         if (pc && candidate) pc.addIceCandidate(new RTCIceCandidate(candidate));
       });

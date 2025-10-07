@@ -105,20 +105,27 @@
       socket.on('disconnect', () => setStatus('disconnected', false));
 
       socket.on('webrtc:offer', async ({ fromSocketId, sdp }) => {
+        console.log('Received offer from host:', fromSocketId);
         pc = new RTCPeerConnection(iceConfig);
         pc.ontrack = (ev) => {
+          console.log('Received track from host:', ev);
           remoteStream = ev.streams[0];
           videoEl.srcObject = remoteStream;
         };
         pc.onicecandidate = (ev) => {
-          if (ev.candidate) socket.emit('webrtc:ice-candidate', { toSocketId: fromSocketId, candidate: ev.candidate, roomId: roomIdInput.value });
+          if (ev.candidate) {
+            console.log('Sending ICE candidate to host:', fromSocketId);
+            socket.emit('webrtc:ice-candidate', { toSocketId: fromSocketId, candidate: ev.candidate, roomId: roomIdInput.value });
+          }
         };
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+        console.log('Sending answer to host:', fromSocketId);
         socket.emit('webrtc:answer', { toSocketId: fromSocketId, sdp: answer, roomId: roomIdInput.value });
       });
       socket.on('webrtc:ice-candidate', ({ fromSocketId, candidate }) => {
+        console.log('Received ICE candidate from host:', fromSocketId);
         if (pc && candidate) pc.addIceCandidate(new RTCIceCandidate(candidate));
       });
 
