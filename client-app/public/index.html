@@ -111,6 +111,14 @@
           console.log('Received track from host:', ev);
           remoteStream = ev.streams[0];
           videoEl.srcObject = remoteStream;
+          const tryPlay = async () => {
+            try { await videoEl.play(); } catch (e) { console.warn('videoEl.play() failed, will retry on interaction', e); }
+          };
+          if (videoEl.readyState >= 2) {
+            tryPlay();
+          } else {
+            videoEl.onloadedmetadata = () => { tryPlay(); };
+          }
         };
         pc.onicecandidate = (ev) => {
           if (ev.candidate) {
