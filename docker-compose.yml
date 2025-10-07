@@ -28,7 +28,7 @@ services:
     container_name: client-app
     environment:
       - NODE_ENV=production
-      - SIGNALING_URL=ws://signaling:3000
+      - SIGNALING_URL=wss://signaling:3000
     ports:
       - "5001:5000"
     depends_on:
