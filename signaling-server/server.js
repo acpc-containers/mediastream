@@ -31,8 +31,8 @@ try {
   console.log('Certificates not found, using HTTP server only');
 }
 
-// Use HTTP server for Socket.IO (more reliable for self-signed certs)
-const server = httpServer;
+// Use HTTPS server for Socket.IO to support both WS and WSS
+const server = httpsServer || httpServer;
 const io = new SocketIOServer(server, {
 	cors: {
 		origin: '*'
@@ -134,15 +134,16 @@ io.on('connection', (socket) => {
 	});
 });
 
-// Start HTTP server (for Socket.IO)
-httpServer.listen(PORT, () => {
-	console.log(`Signaling server listening on HTTP :${PORT}`);
+// Start the main server (HTTPS if available, otherwise HTTP)
+server.listen(PORT, () => {
+	const protocol = server instanceof https.Server ? 'HTTPS' : 'HTTP';
+	console.log(`Signaling server listening on ${protocol} :${PORT}`);
 });
 
-// Start HTTPS server on different port if available
+// Also start HTTP server on different port if we have HTTPS
 if (httpsServer) {
-	httpsServer.listen(3443, () => {
-		console.log(`Signaling server listening on HTTPS :3443`);
+	httpServer.listen(3443, () => {
+		console.log(`Signaling server also listening on HTTP :3443`);
 	});
 }
 
