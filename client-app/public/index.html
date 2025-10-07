@@ -151,12 +151,22 @@
         const rtt = performance.now() - t0; socket.emit('heartbeat:latency', Math.round(rtt));
       });
     }
+    
+    function connectToSignaling() {
+      if (socket && socket.connected) return;
+      if (socket) try { socket.disconnect(); } catch {}
+      socket = io(signalUrlInput.value, { transports: ['websocket'], reconnection: true, reconnectionDelay: 1000, reconnectionDelayMax: 5000 });
+      attachSocketHandlers();
+      socket.on('connect', () => {
+        socket.emit('identify', { role: 'client', hostname: hostnameEl.textContent, roomId: roomIdInput.value });
+      });
+      socket.on('disconnect', () => {
+        // Auto-reconnect with backoff handled by Socket.IO options
+      });
+    }
 
     document.getElementById('connectBtn').onclick = () => {
-      if (socket) socket.disconnect();
-      socket = io(signalUrlInput.value, { transports: ['websocket'] });
-      attachSocketHandlers();
-      socket.emit('identify', { role: 'client', hostname: hostnameEl.textContent, roomId: roomIdInput.value });
+      connectToSignaling();
     };
     document.getElementById('disconnectBtn').onclick = () => { if (socket) socket.disconnect(); };
     document.getElementById('sendChat').onclick = () => {
@@ -169,6 +179,11 @@
       chatLog.appendChild(li);
       chatInput.value = '';
     };
+
+    // Auto-connect shortly after load (allow inputs to initialize)
+    window.addEventListener('load', () => {
+      setTimeout(connectToSignaling, 300);
+    });
   </script>
 </body>
 </html>
