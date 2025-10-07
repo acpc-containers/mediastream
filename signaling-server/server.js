@@ -1,15 +1,27 @@
 import express from 'express';
-import http from 'http';
+import https from 'https';
+import fs from 'fs';
+import path from 'path';
 import cors from 'cors';
 import morgan from 'morgan';
 import { Server as SocketIOServer } from 'socket.io';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
 
-const server = http.createServer(app);
+// Load SSL certificates
+const options = {
+  key: fs.readFileSync(path.join(__dirname, 'certs', 'key.pem')),
+  cert: fs.readFileSync(path.join(__dirname, 'certs', 'cert.pem'))
+};
+
+const server = https.createServer(options, app);
 const io = new SocketIOServer(server, {
 	cors: {
 		origin: '*'
@@ -112,7 +124,7 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-	console.log(`Signaling server listening on :${PORT}`);
+	console.log(`Signaling server listening on HTTPS :${PORT}`);
 });
 
 

@@ -59,7 +59,7 @@
 
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script>
-    const SIGNALING_DEFAULT = (location.protocol === 'https:' ? 'wss://' : 'ws://') + (location.hostname || 'localhost') + ':3000';
+    const SIGNALING_DEFAULT = 'wss://' + (location.hostname || 'localhost') + ':3000';
     const signalUrlInput = document.getElementById('signalUrl');
     signalUrlInput.value = SIGNALING_DEFAULT;
     const roomIdInput = document.getElementById('roomId');
@@ -150,9 +150,7 @@
       } catch (e) {
         console.error('startShare failed', e);
         errEl.textContent = (e && e.message) ? e.message : 'Failed to start screen sharing.';
-        if (location.hostname !== 'localhost' && location.protocol !== 'https:') {
-          errEl.textContent += ' Tip: Screen capture may require HTTPS. Try Chrome on LAN with a self-signed cert or open DevTools -> Site settings to allow screen capture.';
-        }
+        // HTTPS is now enabled, so this tip is no longer needed
       }
     }
 
