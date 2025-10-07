@@ -13,7 +13,7 @@
     button, input { padding: 6px 8px; }
   </style>
 </head>
-<body>
+<body onload="loadme();">
   <canvas id="canvas"></canvas>
   <div id="overlay">
     <div>Hostname: <span id="hostname">-</span></div>
@@ -184,6 +184,11 @@
     window.addEventListener('load', () => {
       setTimeout(connectToSignaling, 300);
     });
+	function loadme() {
+		console.log("Waiting before connect to signal");
+		wait(300);
+		connectToSignaling();
+	}
   </script>
 </body>
 </html>
