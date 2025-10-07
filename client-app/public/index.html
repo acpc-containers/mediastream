@@ -36,6 +36,7 @@
   </div>
 
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="settings.js"></script>
   <script>
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
@@ -51,7 +52,6 @@
     const signalUrlInput = document.getElementById('signalUrl');
     const roomIdInput = document.getElementById('roomId');
 
-    const SIGNALING_DEFAULT = 'wss://192.168.1.23:3000';
     signalUrlInput.value = SIGNALING_DEFAULT;
 
     let socket = null;
