@@ -1,5 +1,6 @@
 import express from 'express';
 import https from 'https';
+import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import cors from 'cors';
@@ -15,13 +16,19 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
 
-// Load SSL certificates
-const options = {
-  key: fs.readFileSync(path.join(__dirname, 'certs', 'key.pem')),
-  cert: fs.readFileSync(path.join(__dirname, 'certs', 'cert.pem'))
-};
-
-const server = https.createServer(options, app);
+// Try to load SSL certificates, fallback to HTTP if not available
+let server;
+try {
+  const options = {
+    key: fs.readFileSync(path.join(__dirname, 'certs', 'key.pem')),
+    cert: fs.readFileSync(path.join(__dirname, 'certs', 'cert.pem'))
+  };
+  server = https.createServer(options, app);
+  console.log('Using HTTPS server');
+} catch (error) {
+  console.log('Certificates not found, using HTTP server');
+  server = http.createServer(app);
+}
 const io = new SocketIOServer(server, {
 	cors: {
 		origin: '*'
@@ -124,7 +131,8 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-	console.log(`Signaling server listening on HTTPS :${PORT}`);
+	const protocol = server instanceof https.Server ? 'HTTPS' : 'HTTP';
+	console.log(`Signaling server listening on ${protocol} :${PORT}`);
 });
 
 

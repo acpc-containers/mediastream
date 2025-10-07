@@ -30,7 +30,7 @@ services:
       - NODE_ENV=production
       - SIGNALING_URL=ws://signaling:3000
     ports:
-      - "5000:5000"
+      - "5001:5000"
     depends_on:
       - signaling-server
     networks:

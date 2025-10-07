@@ -1,5 +1,6 @@
 import express from 'express';
 import https from 'https';
+import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -15,14 +16,20 @@ app.get('/hostname', (req, res) => {
   res.json({ hostname: process.env.HOSTNAME || 'host-app' });
 });
 
-// Load SSL certificates
-const options = {
-  key: fs.readFileSync(path.join(__dirname, 'certs', 'key.pem')),
-  cert: fs.readFileSync(path.join(__dirname, 'certs', 'cert.pem'))
-};
-
-https.createServer(options, app).listen(PORT, () => {
-  console.log(`Host app listening on HTTPS :${PORT}`);
-});
+// Try to load SSL certificates, fallback to HTTP if not available
+try {
+  const options = {
+    key: fs.readFileSync(path.join(__dirname, 'certs', 'key.pem')),
+    cert: fs.readFileSync(path.join(__dirname, 'certs', 'cert.pem'))
+  };
+  https.createServer(options, app).listen(PORT, () => {
+    console.log(`Host app listening on HTTPS :${PORT}`);
+  });
+} catch (error) {
+  console.log('Certificates not found, using HTTP server');
+  http.createServer(app).listen(PORT, () => {
+    console.log(`Host app listening on HTTP :${PORT}`);
+  });
+}
 
 
